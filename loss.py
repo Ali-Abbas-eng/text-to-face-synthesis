@@ -1,0 +1,205 @@
+import gc
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import tensorflow as tf
+from Generator import Generator
+
+
+def gradient_penalty_test(discriminator, real_images, gamma: float = 10.):
+    with tf.GradientTape() as gp_tape:
+        gp_tape.watch(real_images)
+        real_output = discriminator(real_images)
+        real_grads = gp_tape.gradient(target=tf.reduce_sum(real_output), sources=real_images)
+        penalty = tf.reduce_sum(tf.square(real_grads), axis=[1, 2, 3])
+        penalty = penalty ** (gamma * .5)
+    return penalty
+
+
+def gradient_penalty(gradients: tf.Tensor) -> tf.Tensor:
+    """
+    Return the gradient penalty, given a gradient.
+    Given a batch of image gradients, you calculate the magnitude of each image's gradient
+    and penalize the mean quadratic distance of each magnitude to 1.
+    :param gradients: the gradient of the critic's scores, with respect to the mixed image
+    :return: scalr, penalty
+    """
+    # convert to an array of shape (batch_size, -1)
+    gradients = tf.reshape(gradients, shape=[len(gradients), -1])
+
+    # calculate the magnitude of every row
+    norm = tf.norm(gradients, ord=2, axis=-1)
+
+    # Penalize the mean squared distance of the gradient norms from 1
+    penalty = tf.reduce_sum((norm - 1) ** 2) / len(norm)
+    return penalty
+
+
+class PathLengthPenalty:
+    """
+    Encapsulation of the Path Length Regularisation
+    Inputs to the Initializer:
+        beta: float, weighted moving average parameter
+    Inputs to the call function:
+        inputs: list, two elements, element 1: images batch, element 2 noise of the same shape of the images batch
+        :return tf.Tensor Path Length Penalty
+    """
+
+    def __init__(self,
+                 beta: float = 0.99) -> None:
+        """
+        Initializer, only takes the weighted average parameter
+        :param beta: float, the weighted average parameter
+        """
+        # setting class attributes
+        self.beta = beta
+        self.steps = tf.Variable(initial_value=0., trainable=False)
+        self.exp_sum_a = tf.Variable(initial_value=0., trainable=False)
+        gc.collect()
+
+    def __call__(self, generator: Generator, w: tf.Tensor or tf.Variable) -> tf.Tensor:
+        """
+        create a callable instance of the class for convenience in calculating the overall loss
+        :param inputs: list, two elements, images batch, latents
+        :return: tf.Tensor, path length penalty
+        """
+
+        # create a computation graph to calculate gradients
+        with tf.GradientTape() as gradient_tape:
+            # unpack inputs
+            gradient_tape.watch(w)
+            x = generator(w)
+            y = tf.random.normal(shape=x.shape) / x.shape[2]
+
+            target = tf.reduce_sum(x * y)
+
+            # calculate the gradients
+            gradients = gradient_tape.gradient(target=target, sources=w, output_gradients=tf.ones(target.shape))
+            # compute the 2-norm of the gradients
+            norm = tf.sqrt(tf.reduce_mean(tf.reduce_sum(gradients ** 2, axis=2), axis=1))
+
+            # in case this is not the first step
+            if self.steps > 0:
+                # calculate a
+                a = self.exp_sum_a / (1 - self.beta ** self.steps)
+                loss = tf.reduce_mean((norm - a) ** 2)
+            else:
+                # otherwise zero-out the loss
+                loss = tf.convert_to_tensor(.0)
+
+            # calculate the mean of L2-norm of J * W
+            mean = tf.reduce_mean(norm)
+
+            # update the exponential sum
+            self.exp_sum_a.assign(self.exp_sum_a * self.beta + (1 - self.beta) * mean)
+
+            # increase steps
+            self.steps.assign(self.steps + 1)
+        return loss
+
+
+def wasserstein_loss_discriminator(f_real: tf.Tensor, f_fake: tf.Tensor):
+    """
+    computes the wasserstein loss of the discriminator
+    :param f_real: tf.Tensor, batch of discriminator's output for a batch of real images
+    :param f_fake: tf.Tensor, batch of discriminator's output for a batch of fake images
+    :return: tf.Tensor, one value, the resulted loss
+    """
+    return tf.reduce_mean(tf.nn.relu(1 - f_real)) - tf.reduce_mean(tf.nn.relu(1 + f_fake))
+
+
+def path_length_regularisation(generator, w, a):
+    with tf.GradientTape() as ppl_tape:
+        ppl_tape.watch(w)
+        fake_images = generator(w)
+        random_images = tf.random.normal(shape=fake_images.shape) / fake_images.shape[2]
+        output_var = tf.reduce_sum((fake_images * random_images))
+        current_grad = ppl_tape.gradient(target=output_var, sources=w)
+        penalty = tf.sqrt(tf.reduce_sum((current_grad - a) ** 2))
+        return penalty, output_var
+
+
+def non_saturating_logistic_loss(f_fake: tf.Tensor) -> tf.Tensor:
+    """
+    computes wasserstein loss of the generator
+    :param f_fake: tf.Tensor, output of the discriminator for the fake images generated by the Generator
+    :return: tf.Tensor, one value, the resulted loss
+    """
+    return tf.nn.softplus(-f_fake)
+
+
+if __name__ == '__main__':
+    import numpy as np
+    from utils import print_colored_text as c_print
+
+    def test_gradient_penalty():
+        c_print('Testing Gradient Penalty...', 'red')
+        initial_value = np.random.uniform(low=0, high=5, size=[16, 32, 64, 64])
+        x_tf = tf.Variable(initial_value=initial_value)
+
+        with tf.GradientTape() as tape_:
+            y_tf = x_tf ** 2. + x_tf ** 3. / 3
+            gradients_tf = tape_.gradient(target=y_tf, sources=x_tf)
+
+            penalty_tf = gradient_penalty(gradients_tf)
+
+            c_print(f'2-norm of the output with Tensorflow Implementation: {penalty_tf}', 'blue')
+
+        c_print('Done1!\n')
+
+
+    def test_path_length_penalty():
+        c_print('Testing Path Length Penalty...', 'red')
+        tf_plp = PathLengthPenalty(beta=0.7)
+        generator = Generator(resolution_log2=5, z_dim=128, w_dim=128)
+        for i in range(10):
+            x = np.random.uniform(low=0., high=10., size=(16, 64, 32, 32))
+            w = np.random.uniform(low=-2, high=+2., size=(3, 16, 128))
+            tf_w = tf.Variable(initial_value=w, dtype=tf.float32)
+            c_print(f'Path Length Penalty on the {i}th step: {tf_plp(generator=generator, w=tf_w)}', 'blue')
+        c_print('Done!\n')
+
+    def test_wasserstein_loss():
+        c_print('Testing Wasserstein Loss...', 'red')
+        from Generator import Generator
+        from Discriminator import Discriminator
+        import matplotlib.pyplot as plt
+        from tqdm import trange
+        parameters = {
+            'batch_size': 16,
+            'z_dim': 512,
+            'resolution': 8
+        }
+        w = tf.random.normal(shape=[8, parameters['batch_size'], parameters['z_dim']])
+
+        c_print(f'Shape of the Input Noise Vector Z: {w.shape}', 'blue')
+        generator = Generator(resolution_log2=parameters['resolution'],
+                              data_format='channels_last')
+        discriminator = Discriminator(resolution=parameters['resolution'],
+                                      data_format='channels_last')
+        fakes = generator(w)
+        c_print(f'Shape of the Generated Images: {fakes.shape}', 'blue')
+
+        reals = []
+        for i in trange(parameters['batch_size']):
+            image = plt.imread(os.path.join(r'Data/faces (1.0 ratio)', rf'{i+1:06}.jpg')) / 255.
+            image = tf.image.resize(images=image, size=[2 ** parameters['resolution'], 2 ** parameters['resolution']])
+            reals.append(image)
+        reals = tf.convert_to_tensor(reals)
+        c_print(f'Shape of the Image read and resized: {reals.shape}', 'blue')
+
+        disc_reals = discriminator(reals)
+        c_print(f'Shape of the Discriminator Output for Real Images: {disc_reals.shape}', 'blue')
+
+        disc_fakes = discriminator(fakes)
+        c_print(f'Shape of the Discriminator Output for Fake Images: {disc_fakes.shape}', 'blue')
+
+        w_loss = wasserstein_loss_discriminator(f_real=disc_reals, f_fake=disc_fakes)
+        c_print(f'The Wasserstein Loss Output was: {w_loss}', 'blue')
+
+        c_print('Done!\n')
+
+    test_gradient_penalty()
+
+    test_path_length_penalty()
+
+    test_wasserstein_loss()
