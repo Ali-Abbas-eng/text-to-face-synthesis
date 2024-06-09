@@ -48,6 +48,11 @@ The report presents evaluation metrics such as **AUC-ROC** and visual examples o
 
 ## Conclusion
 The project demonstrates the integration of multiple deep learning models for the novel task of text-to-face synthesis, with potential applications in security and surveillance domains.
+<p align="center">
+  <img src="assets/CompleteModelOverview.png">
+  <br>
+  Complete Model Flow Chart
+</p>
 
 ## References:
 **[1]** Devlin, J., Chang, M.W., Lee, K. and Toutanova, K., 2019. BERT: Pre-training of deep bidirectional transformers for language understanding. arXiv preprint arXiv:1810.04805.
