@@ -7,20 +7,29 @@ This project aims at building an integrated model to process text and generate c
 ### Text Classification Model
 A text classification model based on **BERT (Bidirectional Encoder Representations from Transformers)** was developed to encode the input text into a compact representation[1].
 
-![BERT Architecture](assets/BertArchitecture.jpeg)
-<p align="center">BERT Architecture.</p>
+<p align="center">
+  <img src="assets/BertArchitecture.jpeg">
+  <br>
+  BERT Architecture.
+</p>
 
 ### Image Generation Model
 The **StyleGAN2** architecture was employed for unconditional image generation, producing initial face images.
 
-![StyleGAN2 Architecture](assets/StyleGAN2.png)
-<p align="center">This is the StyleGAN2 network architecture used in our project[2].</p>
-
+<p align="center">
+  <img src="assets/StyleGAN2.png">
+  <br>
+  This is the StyleGAN2 network architecture used in our project[2].
+</p>
 
 ### Image Encoding Model
 A **ResNet50** model was used to encode the generated images into a compact representation, matching the dimensionality of the text encoding.[3]
-![RESNET50 Architecture](assets/Resnet50Architecture.png)
-<p align="center">ResNet50 Architecture.</p>
+
+<p align="center">
+  <img src="assets/Resnet50Architecture.png">
+  <br>
+  ResNet50 Architecture.
+</p>
 
 ### Logistic Regression Model
 A logistic regression model was trained to map the noise input to StyleGAN2 (latent space) to the predicted labels from the text classifier. By adjusting the noise along the dimensions corresponding to the desired labels, new images satisfying the text description could be generated.
@@ -31,12 +40,14 @@ As a practical application, a monitoring system was developed to detect faces in
 ## Key Results
 The report presents evaluation metrics such as **AUC-ROC** and visual examples of generated face images corresponding to input text descriptions.
 
-![Model Output](assets/ModelOutput.png)
-<p align="center">Output for the Text "He's a bald old man wearing eyeglasses".</p>
+<p align="center">
+  <img src="assets/ModelOutput.png">
+  <br>
+  Output for the Text "He's a bald old man wearing eyeglasses".
+</p>
 
 ## Conclusion
 The project demonstrates the integration of multiple deep learning models for the novel task of text-to-face synthesis, with potential applications in security and surveillance domains.
-
 
 ## References:
 **[1]** Devlin, J., Chang, M.W., Lee, K. and Toutanova, K., 2019. BERT: Pre-training of deep bidirectional transformers for language understanding. arXiv preprint arXiv:1810.04805.
